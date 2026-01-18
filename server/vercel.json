@@ -8,16 +8,8 @@
     ],
     "routes": [
         {
-            "src": "/api/(.*)",
-            "dest": "server.js"
-        },
-        {
             "src": "/(.*)",
             "dest": "server.js"
         }
-    ],
-    "env": {
-        "MONGODB_URI": "@mongodb_uri",
-        "NODE_ENV": "production"
-    }
+    ]
 }
