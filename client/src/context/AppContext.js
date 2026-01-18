@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { productAPI, saleAPI } from '../services/api';
+import syncManager from '../services/syncManager';
 import toast from 'react-hot-toast';
 
 const AppContext = createContext();
@@ -17,27 +18,52 @@ export const AppProvider = ({ children }) => {
     const [cart, setCart] = useState([]);
     const [loading, setLoading] = useState(true);
     const [isOnline, setIsOnline] = useState(navigator.onLine);
+    const [pendingSalesCount, setPendingSalesCount] = useState(0);
+
+    const updatePendingCount = useCallback(async () => {
+        try {
+            const count = await syncManager.getPendingCount();
+            setPendingSalesCount(count);
+        } catch (error) {
+            console.error('Error getting pending count:', error);
+        }
+    }, []);
 
     useEffect(() => {
         const handleOnline = () => {
             setIsOnline(true);
-            toast.success('Back online!');
-            fetchProducts();
+            toast.success('Back online! Syncing pending sales...');
+            syncManager.syncPendingSales().then(() => {
+                fetchProducts();
+                updatePendingCount();
+            });
         };
 
         const handleOffline = () => {
             setIsOnline(false);
-            toast.error('You are offline');
+            toast.error('You are offline. Sales will be saved locally.');
         };
 
         window.addEventListener('online', handleOnline);
         window.addEventListener('offline', handleOffline);
 
+        const unsubscribe = syncManager.addListener((event, data) => {
+            if (event === 'sync-complete') {
+                updatePendingCount();
+                fetchProducts();
+            } else if (event === 'sale-queued') {
+                updatePendingCount();
+            }
+        });
+
+        updatePendingCount();
+
         return () => {
             window.removeEventListener('online', handleOnline);
             window.removeEventListener('offline', handleOffline);
+            unsubscribe();
         };
-    }, []);
+    }, [updatePendingCount]);
 
     const fetchProducts = useCallback(async () => {
         try {
@@ -46,9 +72,8 @@ export const AppProvider = ({ children }) => {
             setProducts(response.data);
         } catch (error) {
             if (!error.isOffline) {
-                toast.error('Failed to fetch products');
+                console.error('Error fetching products:', error);
             }
-            console.error('Error fetching products:', error);
         } finally {
             setLoading(false);
         }
@@ -164,15 +189,61 @@ export const AppProvider = ({ children }) => {
             return null;
         }
 
-        try {
-            const saleData = {
-                items: cart.map((item) => ({
-                    productId: item.product._id,
-                    quantity: item.quantity
-                })),
-                paymentMethod
-            };
+        const saleData = {
+            items: cart.map((item) => ({
+                productId: item.product._id,
+                quantity: item.quantity
+            })),
+            paymentMethod
+        };
 
+        if (!isOnline) {
+            try {
+                const pendingSale = await syncManager.createOfflineSale(saleData);
+
+                setProducts((prev) =>
+                    prev.map((product) => {
+                        const cartItem = cart.find((item) => item.product._id === product._id);
+                        if (cartItem) {
+                            return {
+                                ...product,
+                                stockQuantity: product.stockQuantity - cartItem.quantity
+                            };
+                        }
+                        return product;
+                    })
+                );
+
+                clearCart();
+                toast.success('📴 Sale saved offline! Will sync when back online.');
+
+                const cartTotal = cart.reduce(
+                    (total, item) => total + item.product.price * item.quantity, 0
+                );
+
+                return {
+                    sale: {
+                        _id: pendingSale.tempId,
+                        items: cart.map((item) => ({
+                            productName: item.product.name,
+                            quantity: item.quantity,
+                            price: item.product.price,
+                            subtotal: item.product.price * item.quantity
+                        })),
+                        totalAmount: cartTotal * 1.18,
+                        paymentMethod,
+                        createdAt: pendingSale.createdAt
+                    },
+                    lowStockAlerts: [],
+                    isOffline: true
+                };
+            } catch (error) {
+                toast.error('Failed to save sale offline');
+                throw error;
+            }
+        }
+
+        try {
             const response = await saleAPI.create(saleData);
 
             if (response.data.lowStockAlerts && response.data.lowStockAlerts.length > 0) {
@@ -196,6 +267,10 @@ export const AppProvider = ({ children }) => {
             toast.success('Sale completed successfully!');
             return response.data;
         } catch (error) {
+            if (!navigator.onLine || error.isOffline) {
+                setIsOnline(false);
+                return completeSale(paymentMethod);
+            }
             const message = error.response?.data?.message || 'Failed to complete sale';
             toast.error(message);
             throw error;
@@ -214,11 +289,20 @@ export const AppProvider = ({ children }) => {
         return products.filter((product) => product.isLowStock);
     };
 
+    const syncPendingSales = async () => {
+        return syncManager.syncPendingSales();
+    };
+
+    const getPendingSales = async () => {
+        return syncManager.getPendingSales();
+    };
+
     const value = {
         products,
         cart,
         loading,
         isOnline,
+        pendingSalesCount,
         fetchProducts,
         addProduct,
         updateProduct,
@@ -231,7 +315,9 @@ export const AppProvider = ({ children }) => {
         getCartItemCount,
         completeSale,
         requestNotificationPermission,
-        getLowStockProducts
+        getLowStockProducts,
+        syncPendingSales,
+        getPendingSales
     };
 
     return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

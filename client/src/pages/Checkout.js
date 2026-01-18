@@ -1,14 +1,18 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
     FiShoppingCart,
     FiSearch,
     FiShoppingBag,
     FiDollarSign,
     FiCreditCard,
-    FiSmartphone
+    FiSmartphone,
+    FiPrinter,
+    FiX,
+    FiCheck
 } from 'react-icons/fi';
 import { useApp } from '../context/AppContext';
 import CheckoutItem from '../components/CheckoutItem';
+import PrintBill from '../components/PrintBill';
 
 function Checkout() {
     const {
@@ -27,6 +31,9 @@ function Checkout() {
     const [searchTerm, setSearchTerm] = useState('');
     const [paymentMethod, setPaymentMethod] = useState('cash');
     const [processing, setProcessing] = useState(false);
+    const [completedSale, setCompletedSale] = useState(null);
+    const [showBillModal, setShowBillModal] = useState(false);
+    const printRef = useRef();
 
     const formatCurrency = (amount) => {
         return new Intl.NumberFormat('en-IN', {
@@ -42,17 +49,27 @@ function Checkout() {
     );
 
     const handleCompleteSale = async () => {
-        if (!isOnline) {
-            return;
-        }
         setProcessing(true);
         try {
-            await completeSale(paymentMethod);
+            const result = await completeSale(paymentMethod);
+            if (result) {
+                setCompletedSale(result);
+                setShowBillModal(true);
+            }
         } catch (error) {
             console.error('Sale failed:', error);
         } finally {
             setProcessing(false);
         }
+    };
+
+    const handlePrint = () => {
+        window.print();
+    };
+
+    const handleCloseBillModal = () => {
+        setShowBillModal(false);
+        setCompletedSale(null);
     };
 
     const cartTotal = getCartTotal();
@@ -204,12 +221,12 @@ function Checkout() {
                                     Clear Cart
                                 </button>
                                 <button
-                                    className="btn btn-success"
+                                    className={`btn ${isOnline ? 'btn-success' : 'btn-warning'}`}
                                     onClick={handleCompleteSale}
-                                    disabled={processing || !isOnline}
-                                    style={{ flex: 2 }}
+                                    disabled={processing}
+                                    style={{ flex: 2, background: !isOnline ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)' : undefined }}
                                 >
-                                    {processing ? 'Processing...' : !isOnline ? 'Offline' : 'Complete Sale'}
+                                    {processing ? 'Processing...' : !isOnline ? '📴 Save Offline' : 'Complete Sale'}
                                 </button>
                             </div>
 
@@ -220,13 +237,45 @@ function Checkout() {
                                     textAlign: 'center',
                                     marginTop: '12px'
                                 }}>
-                                    Sales cannot be completed while offline
+                                    Sale will be saved locally and synced when back online
                                 </p>
                             )}
                         </>
                     )}
                 </div>
             </div>
+
+            {showBillModal && completedSale && (
+                <div className="modal-overlay" onClick={handleCloseBillModal}>
+                    <div
+                        className="modal"
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ maxWidth: '400px', background: 'var(--bg-secondary)' }}
+                    >
+                        <div className="modal-header">
+                            <h2 className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                <FiCheck style={{ color: 'var(--accent-success)' }} />
+                                Sale Complete!
+                            </h2>
+                            <button className="modal-close no-print" onClick={handleCloseBillModal}>
+                                <FiX size={24} />
+                            </button>
+                        </div>
+                        <div className="modal-body" style={{ display: 'flex', justifyContent: 'center' }}>
+                            <PrintBill ref={printRef} sale={completedSale} />
+                        </div>
+                        <div className="modal-footer no-print">
+                            <button className="btn btn-secondary" onClick={handleCloseBillModal}>
+                                Close
+                            </button>
+                            <button className="btn btn-primary" onClick={handlePrint}>
+                                <FiPrinter />
+                                Print Bill
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
