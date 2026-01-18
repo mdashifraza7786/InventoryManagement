@@ -63,6 +63,7 @@ export const AppProvider = ({ children }) => {
             window.removeEventListener('offline', handleOffline);
             unsubscribe();
         };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [updatePendingCount]);
 
     const fetchProducts = useCallback(async () => {

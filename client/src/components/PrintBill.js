@@ -17,7 +17,6 @@ const PrintBill = forwardRef(({ sale, shopName = "InvBilling Store" }, ref) => {
 
   if (!sale) return null;
 
-  const isOffline = sale.isOffline || sale.sale._id?.startsWith('offline-');
   const subtotal = sale.sale.items.reduce((sum, item) => sum + item.subtotal, 0);
   const tax = subtotal * 0.18;
 
